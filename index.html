@@ -1,0 +1,608 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Numbered Audio</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+    }
+
+    body {
+      background: #fff;
+      color: #111;
+      font-family: Arial, Helvetica, sans-serif;
+      text-align: center;
+    }
+
+    .page {
+      display: grid;
+      grid-template-rows: 1fr auto 1fr;
+      align-items: stretch;
+      justify-items: center;
+      width: 100%;
+      min-height: 100vh;
+      min-height: 100svh;
+      padding: 0 16px;
+    }
+
+    .upload-area {
+      grid-row: 1;
+      align-self: start;
+      justify-self: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 9px;
+      width: 100%;
+      padding-top: 26px;
+    }
+
+    .player {
+      grid-row: 2;
+      align-self: center;
+      justify-self: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      padding: 18px 0;
+    }
+
+    button {
+      appearance: none;
+      border: 1px solid #888;
+      border-radius: 4px;
+      background: #efefef;
+      color: #111;
+      font: inherit;
+      font-size: 18px;
+      line-height: 1.2;
+      cursor: pointer;
+    }
+
+    button:hover:not(:disabled) { background: #e2e2e2; }
+    button:active:not(:disabled) { background: #d5d5d5; }
+    button:disabled { cursor: wait; opacity: .6; }
+    button:focus-visible {
+      outline: 2px solid #111;
+      outline-offset: 3px;
+    }
+
+    #uploadButton {
+      min-width: 118px;
+      padding: 5px 12px;
+    }
+
+    #fileName {
+      max-width: min(90vw, 420px);
+      overflow-wrap: anywhere;
+      color: #333;
+      font-size: 13px;
+    }
+
+    #uploadCount {
+      color: #777;
+      font-size: 12px;
+    }
+
+    #uploadMessage,
+    #playerMessage {
+      min-height: 17px;
+      max-width: min(90vw, 360px);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .display {
+      min-height: 31px;
+      margin-bottom: 23px;
+      font-size: 25px;
+      font-weight: 400;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .pad {
+      display: grid;
+      grid-template-columns: repeat(5, 38px);
+      gap: 6px;
+    }
+
+    .digit {
+      width: 38px;
+      height: 36px;
+      padding: 0;
+    }
+
+    .play-button {
+      min-width: 72px;
+      margin-top: 21px;
+      padding: 5px 12px;
+    }
+
+    #playerMessage { margin-top: 13px; }
+
+    @media (max-height: 500px) {
+      .upload-area { padding-top: 12px; gap: 5px; }
+      .player { padding: 8px 0; }
+      .display { margin-bottom: 12px; }
+      .play-button { margin-top: 12px; }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="page">
+
+    <header class="upload-area">
+      <button id="uploadButton" type="button">choose file</button>
+
+      <input
+        id="fileInput"
+        type="file"
+        accept=".mp3,.wav,audio/mpeg,audio/wav,audio/x-wav"
+        hidden
+      >
+
+      <div id="fileName">No file selected</div>
+      <div id="uploadCount">Loading uploads…</div>
+      <div id="uploadMessage" role="status"></div>
+    </header>
+
+    <section class="player">
+
+      <div id="display" class="display">0</div>
+
+      <div class="pad">
+        <button class="digit" type="button" data-digit="0">0</button>
+        <button class="digit" type="button" data-digit="1">1</button>
+        <button class="digit" type="button" data-digit="2">2</button>
+        <button class="digit" type="button" data-digit="3">3</button>
+        <button class="digit" type="button" data-digit="4">4</button>
+        <button class="digit" type="button" data-digit="5">5</button>
+        <button class="digit" type="button" data-digit="6">6</button>
+        <button class="digit" type="button" data-digit="7">7</button>
+        <button class="digit" type="button" data-digit="8">8</button>
+        <button class="digit" type="button" data-digit="9">9</button>
+      </div>
+
+      <button id="playButton" class="play-button" type="button">
+        play
+      </button>
+
+      <div id="playerMessage" role="status"></div>
+
+    </section>
+  </main>
+
+  <audio id="audio" preload="none"></audio>
+
+  <script>
+    const DB_NAME = 'numbered-audio-github-pages-prototype';
+    const STORE_NAME = 'recordings';
+    const MAX_DURATION_SECONDS = 300;
+    const MAX_FILE_BYTES = 50 * 1024 * 1024;
+
+    const uploadButton = document.getElementById('uploadButton');
+    const fileInput = document.getElementById('fileInput');
+    const fileName = document.getElementById('fileName');
+    const uploadCount = document.getElementById('uploadCount');
+    const uploadMessage = document.getElementById('uploadMessage');
+    const display = document.getElementById('display');
+    const playButton = document.getElementById('playButton');
+    const playerMessage = document.getElementById('playerMessage');
+    const audio = document.getElementById('audio');
+    const digitButtons = Array.from(document.querySelectorAll('.digit'));
+
+    let database = null;
+    let selectedFile = null;
+    let dial = '';
+    let activeNumber = null;
+    let activeObjectUrl = null;
+    let uploading = false;
+    let startingPlayback = false;
+    let playbackToken = 0;
+
+    function setMessage(element, text) {
+      element.textContent = text;
+    }
+
+    // OPEN LOCAL DATABASE
+
+    function openDatabase() {
+      return new Promise((resolve, reject) => {
+        if (!('indexedDB' in window)) {
+          reject(new Error('This browser does not support local recording storage.'));
+          return;
+        }
+
+        const request = indexedDB.open(DB_NAME, 1);
+
+        request.onupgradeneeded = () => {
+          const db = request.result;
+
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME, {
+              keyPath: 'number',
+              autoIncrement: true
+            });
+          }
+        };
+
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+        request.onblocked = () => reject(
+          new Error('Storage is blocked by another open tab.')
+        );
+      });
+    }
+
+    // COUNT RECORDINGS
+
+    function countRecordings() {
+      return new Promise((resolve, reject) => {
+        const tx = database.transaction(STORE_NAME, 'readonly');
+        const request = tx.objectStore(STORE_NAME).count();
+
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    async function refreshCount() {
+      const count = await countRecordings();
+
+      uploadCount.textContent =
+        count === 1 ? '1 upload' : `${count} uploads`;
+    }
+
+    // SAVE RECORDING WITH AUTOMATIC SEQUENTIAL NUMBER
+
+    function addRecording(file) {
+      return new Promise((resolve, reject) => {
+        const tx = database.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const request = store.add({ file });
+
+        let assignedNumber;
+
+        request.onsuccess = () => {
+          assignedNumber = request.result;
+        };
+
+        request.onerror = () => reject(request.error);
+
+        tx.oncomplete = () => resolve(assignedNumber);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+    }
+
+    // RETRIEVE RECORDING
+
+    function getRecording(number) {
+      return new Promise((resolve, reject) => {
+        const tx = database.transaction(STORE_NAME, 'readonly');
+        const request = tx.objectStore(STORE_NAME).get(number);
+
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    // CHECK AUDIO DURATION
+
+    function inspectAudioDuration(file) {
+      return new Promise((resolve, reject) => {
+        const probe = document.createElement('audio');
+        const objectUrl = URL.createObjectURL(file);
+        let settled = false;
+
+        const timeoutId = setTimeout(() => {
+          finish(null, new Error('The browser could not read this audio file.'));
+        }, 15000);
+
+        function finish(duration, error) {
+          if (settled) return;
+
+          settled = true;
+          clearTimeout(timeoutId);
+
+          probe.removeAttribute('src');
+          probe.load();
+          URL.revokeObjectURL(objectUrl);
+
+          if (error) reject(error);
+          else resolve(duration);
+        }
+
+        probe.preload = 'metadata';
+
+        probe.onloadedmetadata = () => {
+          if (Number.isFinite(probe.duration) && probe.duration > 0) {
+            finish(probe.duration);
+          } else {
+            finish(null, new Error('The audio duration could not be determined.'));
+          }
+        };
+
+        probe.onerror = () => {
+          finish(null, new Error('This file could not be read as audio.'));
+        };
+
+        probe.src = objectUrl;
+      });
+    }
+
+    // RESET FILE SELECTION
+
+    function resetFileSelection(keepName = false) {
+      selectedFile = null;
+      fileInput.value = '';
+      uploadButton.textContent = 'choose file';
+
+      if (!keepName) {
+        fileName.textContent = 'No file selected';
+      }
+    }
+
+    // CHOOSE FILE OR UPLOAD
+
+    uploadButton.addEventListener('click', () => {
+      if (uploading) return;
+
+      if (selectedFile) {
+        uploadSelectedFile();
+      } else {
+        fileInput.click();
+      }
+    });
+
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+
+      selectedFile = file;
+      fileName.textContent = file.name;
+      uploadButton.textContent = 'upload';
+
+      setMessage(uploadMessage, '');
+    });
+
+    // UPLOAD RECORDING
+
+    async function uploadSelectedFile() {
+      if (!selectedFile || uploading || !database) return;
+
+      const file = selectedFile;
+
+      if (!/\.(mp3|wav)$/i.test(file.name)) {
+        setMessage(uploadMessage, 'Please choose an MP3 or WAV file.');
+        resetFileSelection(true);
+        return;
+      }
+
+      if (file.size > MAX_FILE_BYTES) {
+        setMessage(uploadMessage, 'This file is larger than the 50 MB limit.');
+        resetFileSelection(true);
+        return;
+      }
+
+      uploading = true;
+      uploadButton.disabled = true;
+
+      setMessage(uploadMessage, 'Checking audio…');
+
+      try {
+        const duration = await inspectAudioDuration(file);
+
+        if (duration > MAX_DURATION_SECONDS) {
+          throw new Error('Audio must be five minutes or shorter.');
+        }
+
+        setMessage(uploadMessage, 'Saving recording…');
+
+        await addRecording(file);
+        await refreshCount();
+
+        // Do not reveal the assigned number.
+        resetFileSelection(true);
+        setMessage(uploadMessage, 'Upload complete.');
+
+      } catch (error) {
+        setMessage(uploadMessage, error.message || 'The upload failed.');
+        resetFileSelection(true);
+
+      } finally {
+        uploading = false;
+        uploadButton.disabled = false;
+      }
+    }
+
+    // UPDATE NUMBER DISPLAY
+
+    function updateDialDisplay() {
+      display.textContent = dial || '0';
+    }
+
+    // STOP PLAYBACK
+
+    function stopPlayback() {
+      playbackToken++;
+
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+
+      if (activeObjectUrl) {
+        URL.revokeObjectURL(activeObjectUrl);
+      }
+
+      activeObjectUrl = null;
+      activeNumber = null;
+      playButton.textContent = 'play';
+    }
+
+    // ENTER A DIGIT
+
+    function enterDigit(digit) {
+      if (dial.length >= 8) return;
+
+      stopPlayback();
+
+      dial = (dial + digit).replace(/^0+(?=\d)/, '');
+
+      updateDialDisplay();
+      setMessage(playerMessage, '');
+    }
+
+    digitButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        enterDigit(button.dataset.digit);
+      });
+    });
+
+    // KEYBOARD SUPPORT
+
+    document.addEventListener('keydown', event => {
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+
+      if (
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement
+      ) return;
+
+      if (/^\d$/.test(event.key)) {
+        event.preventDefault();
+        enterDigit(event.key);
+
+      } else if (event.key === 'Backspace') {
+        event.preventDefault();
+        stopPlayback();
+
+        dial = dial.slice(0, -1);
+
+        updateDialDisplay();
+        setMessage(playerMessage, '');
+
+      } else if (event.key === 'Escape') {
+        stopPlayback();
+
+        dial = '';
+
+        updateDialDisplay();
+        setMessage(playerMessage, '');
+      }
+    });
+
+    // PLAY / PAUSE
+
+    async function togglePlayback() {
+      if (!database || startingPlayback) return;
+
+      if (activeNumber !== null) {
+        if (!audio.paused) {
+          audio.pause();
+          playButton.textContent = 'play';
+          return;
+        }
+
+        try {
+          await audio.play();
+          playButton.textContent = 'pause';
+          setMessage(playerMessage, '');
+        } catch (error) {
+          setMessage(playerMessage, 'Playback could not be started.');
+        }
+
+        return;
+      }
+
+      const number = Number(dial);
+
+      if (!Number.isSafeInteger(number) || number < 1) {
+        setMessage(playerMessage, 'Enter a number first.');
+        return;
+      }
+
+      startingPlayback = true;
+      playButton.disabled = true;
+
+      const thisRequest = ++playbackToken;
+
+      try {
+        const recording = await getRecording(number);
+
+        if (thisRequest !== playbackToken) return;
+
+        if (!recording || !recording.file) {
+          setMessage(playerMessage, `Number ${number} does not exist.`);
+          return;
+        }
+
+        activeObjectUrl = URL.createObjectURL(recording.file);
+        activeNumber = number;
+        audio.src = activeObjectUrl;
+
+        await audio.play();
+
+        if (thisRequest !== playbackToken) return;
+
+        playButton.textContent = 'pause';
+        setMessage(playerMessage, '');
+
+      } catch (error) {
+        if (thisRequest === playbackToken) {
+          stopPlayback();
+          setMessage(playerMessage, 'This recording could not be played.');
+        }
+
+      } finally {
+        startingPlayback = false;
+        playButton.disabled = false;
+      }
+    }
+
+    playButton.addEventListener('click', togglePlayback);
+
+    audio.addEventListener('ended', stopPlayback);
+
+    audio.addEventListener('error', () => {
+      if (activeNumber !== null) {
+        stopPlayback();
+        setMessage(playerMessage, 'This recording could not be played.');
+      }
+    });
+
+    // INITIALIZE
+
+    async function initialize() {
+      try {
+        database = await openDatabase();
+        await refreshCount();
+        setMessage(uploadMessage, '');
+
+      } catch (error) {
+        console.error(error);
+
+        setMessage(
+          uploadMessage,
+          error.message || 'Local storage could not be opened.'
+        );
+
+        uploadButton.disabled = true;
+      }
+    }
+
+    initialize();
+  </script>
+</body>
+</html>
