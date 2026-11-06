@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -18,7 +19,7 @@ html, body {
 body {
   background: white;
   color: black;
-  font-family: serif;
+  font-family: sans-serif;
   font-size: 13px;
 }
 
@@ -111,8 +112,6 @@ button {
 
 <main class="page">
 
-  <!-- Upload area -->
-
   <header class="upload-area">
 
     <button id="uploadButton" type="button">
@@ -134,8 +133,6 @@ button {
 
   </header>
 
-
-  <!-- Number player -->
 
   <section class="player">
 
@@ -662,8 +659,6 @@ async function togglePlayback() {
   if (!database || startingPlayback) return;
 
 
-  // Pause
-
   if (activeNumber !== null && !audio.paused) {
 
     audio.pause();
@@ -674,8 +669,6 @@ async function togglePlayback() {
 
   }
 
-
-  // Resume
 
   if (activeNumber !== null && audio.paused) {
 
@@ -697,8 +690,6 @@ async function togglePlayback() {
 
   }
 
-
-  // Read dialed number
 
   const number = Number(dial);
 
