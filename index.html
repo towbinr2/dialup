@@ -1,104 +1,203 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>public internet sound storage</title>
-  <style>
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-
-    header {
-      margin-top: 1em;
-      text-align: center;
-    }
-
-    .middle {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-    }
-
-    .number {
-      margin-bottom: 1em;
-    }
-
-    .pad {
-      display: grid;
-      grid-template-columns: repeat(3, auto);
-      gap: 0;
-      justify-content: center;
-    }
-
-    .zero {
-      display: flex;
-      justify-content: center;
-    }
-
-    .controls {
-      margin-top: 1em;
-      display: flex;
-      gap: 0.5em;
-    }
-
-    footer {
-      margin-bottom: 1em;
-      text-align: center;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>public internet sound storage</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+  header { margin-top: 1em; text-align: center; }
+  .middle { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+  #number { margin-bottom: 1em; }
+  .pad { display: grid; grid-template-columns: repeat(3, auto); gap: 0; justify-content: center; }
+  .zero { display: flex; justify-content: center; }
+  .controls { margin-top: 1em; display: flex; gap: .5em; }
+  footer { margin-bottom: 1em; text-align: center; }
+  #fileName, #playerMessage { margin-top: .5em; text-align: center; }
+</style>
 </head>
 <body>
-  <header>
-    <div>public internet sound storage</div>
-    <div style="margin-top:1em;">
-      <button>choose file</button>
+<header>
+  <div>public internet sound storage</div>
+  <div style="margin-top:1em"><button id="uploadButton">choose file</button></div>
+  <input id="fileInput" type="file" accept=".mp3,.wav,audio/mpeg,audio/wav" hidden>
+  <div id="fileName"></div>
+  <div id="uploadCount"></div>
+  <div id="turnstile"></div>
+</header>
+<div class="middle">
+  <div id="number">0</div>
+  <div>
+    <div class="pad">
+      <button onclick="add('1')">1</button><button onclick="add('2')">2</button><button onclick="add('3')">3</button>
+      <button onclick="add('4')">4</button><button onclick="add('5')">5</button><button onclick="add('6')">6</button>
+      <button onclick="add('7')">7</button><button onclick="add('8')">8</button><button onclick="add('9')">9</button>
     </div>
-  </header>
-
-  <div class="middle">
-    <div id="number" class="number">104</div>
-
-    <div>
-      <div class="pad">
-        <button onclick="add('1')">1</button>
-        <button onclick="add('2')">2</button>
-        <button onclick="add('3')">3</button>
-        <button onclick="add('4')">4</button>
-        <button onclick="add('5')">5</button>
-        <button onclick="add('6')">6</button>
-        <button onclick="add('7')">7</button>
-        <button onclick="add('8')">8</button>
-        <button onclick="add('9')">9</button>
-      </div>
-      <div class="zero">
-        <button onclick="add('0')">0</button>
-      </div>
-    </div>
-
-    <div class="controls">
-      <button>prev</button>
-      <button>play</button>
-      <button>next</button>
-    </div>
+    <div class="zero"><button onclick="add('0')">0</button></div>
   </div>
+  <div class="controls">
+    <button id="prev">prev</button><button id="play">play</button><button id="next">next</button>
+  </div>
+  <div id="playerMessage" role="status"></div>
+</div>
+<footer><a href="https://otherllc.com/">© 2026 other llc</a></footer>
+<audio id="audio" crossorigin="anonymous"></audio>
+<script>
+// REPLACE THESE TWO VALUES BEFORE PUBLISHING:
+const API = 'https://piss-api.towbinr.workers.dev';
+const TURNSTILE_SITE_KEY = '0x4AAAAAAF3sJEXZ9P_ZjYtD';
 
-  <footer>
-    <a href="https://otherllc.com/">© 2026 other llc</a>
-  </footer>
+let value = '', active = 0, busy = false, widgetId = null, verificationToken = '';
+let verificationWaiter = null;
+const $ = id => document.getElementById(id);
+const audio = $('audio');
 
-  <script>
-    let value = "104";
-    function add(n) {
-      value += n;
-      document.getElementById("number").textContent = value;
+function showNumber() { $('number').textContent = value || '0'; }
+function stop() { audio.pause(); audio.removeAttribute('src'); audio.load(); active = 0; $('play').textContent = 'play'; }
+function add(digit) { if (value.length >= 8) return; stop(); value = (value + digit).replace(/^0+(?=\d)/, ''); showNumber(); $('playerMessage').textContent = ''; }
+function setNumber(n) { stop(); value = n > 0 ? String(n) : ''; showNumber(); $('playerMessage').textContent = ''; }
+
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey || e.altKey || e.metaKey || e.target instanceof HTMLInputElement) return;
+  if (/^\d$/.test(e.key)) add(e.key);
+  if (e.key === 'Backspace') { e.preventDefault(); stop(); value = value.slice(0, -1); showNumber(); }
+  if (e.key === 'Escape') setNumber(0);
+});
+
+$('prev').onclick = () => setNumber(Math.max(1, (Number(value) || 1) - 1));
+$('next').onclick = () => setNumber((Number(value) || 0) + 1);
+
+$('play').onclick = async () => {
+  if (!audio.paused) { audio.pause(); $('play').textContent = 'play'; return; }
+  if (active === Number(value) && audio.src) {
+    try { await audio.play(); $('play').textContent = 'pause'; }
+    catch { $('playerMessage').textContent = 'cannot play recording.'; }
+    return;
+  }
+  const n = Number(value);
+  if (!Number.isSafeInteger(n) || n < 1) { $('playerMessage').textContent = 'enter a number.'; return; }
+  stop();
+  audio.src = `${API}/api/audio/${n}`;
+  active = n;
+  try { await audio.play(); $('play').textContent = 'pause'; $('playerMessage').textContent = ''; }
+  catch { stop(); $('playerMessage').textContent = 'number does not exist or cannot be played.'; }
+};
+audio.onended = () => { $('play').textContent = 'play'; audio.currentTime = 0; };
+
+// selecting a file starts uploading; there is no second upload click.
+$('uploadButton').onclick = () => { if (!busy) $('fileInput').click(); };
+$('fileInput').onchange = () => {
+  const file = $('fileInput').files[0];
+  if (file) upload(file);
+};
+
+async function refreshCount() {
+  try {
+    const r = await fetch(`${API}/api/count`);
+    if (!r.ok) throw Error('count unavailable');
+    const data = await r.json();
+    $('uploadCount').textContent = `${data.count} uploads`;
+  } catch { $('uploadCount').textContent = 'upload count unavailable'; }
+}
+
+function readyToken() {
+  if (verificationToken) return Promise.resolve(verificationToken);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      verificationWaiter = null;
+      reject(Error('verification unavailable. please try again'));
+    }, 30000);
+    verificationWaiter = token => { clearTimeout(timer); verificationWaiter = null; resolve(token); };
+  });
+}
+
+window.onTurnstileLoaded = () => {
+  widgetId = turnstile.render('#turnstile', {
+    sitekey: TURNSTILE_SITE_KEY,
+    appearance: 'interaction-only',
+    callback: token => {
+      verificationToken = token;
+      if (verificationWaiter) verificationWaiter(token);
+    },
+    'expired-callback': () => { verificationToken = ''; },
+    'error-callback': () => { verificationToken = ''; }
+  });
+};
+
+async function durationOf(file) {
+  const probe = document.createElement('audio');
+  const url = URL.createObjectURL(file);
+  try {
+    return await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(Error('cannot read audio duration')), 15000);
+      probe.onloadedmetadata = () => {
+        clearTimeout(timeout);
+        resolve(probe.duration);
+      };
+      probe.onerror = () => { clearTimeout(timeout); reject(Error('invalid audio file')); };
+      probe.src = url;
+    });
+  } finally {
+    probe.removeAttribute('src');
+    probe.load();
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function upload(file) {
+  if (busy) return;
+  busy = true;
+  $('uploadButton').disabled = true;
+  $('uploadButton').textContent = 'uploading...';
+  $('fileName').textContent = file.name.toLowerCase();
+  try {
+    if (!/\.(mp3|wav)$/i.test(file.name)) throw Error('mp3 or wav only');
+    if (file.size > 90 * 1024 * 1024) throw Error('file must be 90 mb or smaller');
+
+    // Check the daily limit before uploading the file.
+    const check = await fetch(`${API}/api/upload-status`);
+    if (!check.ok) throw Error('cannot check upload limit');
+    const status = await check.json();
+    if (!status.allowed) {
+      const err = Error('one upload per 24 hours');
+      err.code = 'daily_limit';
+      throw err;
     }
-  </script>
+
+    const duration = await durationOf(file);
+    if (!Number.isFinite(duration) || duration <= 0 || duration > 300)
+      throw Error('audio must be five minutes or shorter');
+
+    const token = await readyToken();
+    const mime = /\.wav$/i.test(file.name) ? 'audio/wav' : 'audio/mpeg';
+    const response = await fetch(`${API}/api/upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': mime, 'X-Turnstile-Token': token },
+      body: file
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      const err = Error(result.error || 'upload failed');
+      err.code = result.code;
+      throw err;
+    }
+    $('uploadButton').textContent = `uploaded #${result.number}`;
+    $('fileName').textContent = '';
+    await refreshCount();
+  } catch (error) {
+    $('uploadButton').textContent = error.code === 'daily_limit'
+      ? 'one upload per 24 hours'
+      : (error.message || 'upload failed').toLowerCase();
+  } finally {
+    busy = false;
+    $('uploadButton').disabled = false;
+    $('fileInput').value = '';
+    verificationToken = '';
+    if (widgetId !== null && window.turnstile) turnstile.reset(widgetId);
+  }
+}
+refreshCount();
+</script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoaded&render=explicit" async defer></script>
 </body>
 </html>
